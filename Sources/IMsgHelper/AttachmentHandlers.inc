@@ -58,12 +58,11 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
         NSMutableAttributedString *body = [[NSMutableAttributedString alloc] init];
         NSInteger attachmentPartIndex = partIndex;
         if (message.length) {
-            NSString *textPrefix = [message stringByAppendingString:@"\n"];
             NSAttributedString *textBody = nil;
             if ([textFormatting isKindOfClass:[NSArray class]] && textFormatting.count > 0) {
-                textBody = buildFormattedAttributed(textPrefix, textFormatting, partIndex);
+                textBody = buildFormattedAttributed(message, textFormatting, partIndex);
             } else {
-                textBody = buildPlainAttributed(textPrefix, partIndex);
+                textBody = buildPlainAttributed(message, partIndex);
             }
             [body appendAttributedString:textBody];
             attachmentPartIndex = partIndex + 1;
