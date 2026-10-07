@@ -113,3 +113,25 @@ static void setIntegerProperty(id object, SEL selector, NSInteger value) {
     [inv invoke];
 }
 
+
+static NSAttributedString *buildCaptionedAttachmentAttributed(NSString *message,
+                                                             NSArray *textFormatting,
+                                                             NSString *transferGuid,
+                                                             NSString *filename,
+                                                             NSInteger partIndex) {
+    NSMutableAttributedString *body = [[NSMutableAttributedString alloc] init];
+    NSInteger attachmentPartIndex = partIndex;
+    if (message.length) {
+        NSAttributedString *textBody = nil;
+        if ([textFormatting isKindOfClass:[NSArray class]] && textFormatting.count > 0) {
+            textBody = buildFormattedAttributed(message, textFormatting, partIndex);
+        } else {
+            textBody = buildPlainAttributed(message, partIndex);
+        }
+        [body appendAttributedString:textBody];
+        attachmentPartIndex = partIndex + 1;
+    }
+    [body appendAttributedString:buildAttachmentAttributed(transferGuid, filename,
+                                                           attachmentPartIndex)];
+    return body;
+}

@@ -55,21 +55,8 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
             return errorResponse(requestId, @"Transfer registered without guid");
         }
 
-        NSMutableAttributedString *body = [[NSMutableAttributedString alloc] init];
-        NSInteger attachmentPartIndex = partIndex;
-        if (message.length) {
-            NSString *textPrefix = [message stringByAppendingString:@"\n"];
-            NSAttributedString *textBody = nil;
-            if ([textFormatting isKindOfClass:[NSArray class]] && textFormatting.count > 0) {
-                textBody = buildFormattedAttributed(textPrefix, textFormatting, partIndex);
-            } else {
-                textBody = buildPlainAttributed(textPrefix, partIndex);
-            }
-            [body appendAttributedString:textBody];
-            attachmentPartIndex = partIndex + 1;
-        }
-        [body appendAttributedString:buildAttachmentAttributed(transferGuid, filename,
-                                                               attachmentPartIndex)];
+        NSAttributedString *body = buildCaptionedAttachmentAttributed(
+            message, textFormatting, transferGuid, filename, partIndex);
 
         NSAttributedString *subjectAttr = subject.length
             ? buildPlainAttributed(subject, 0)
