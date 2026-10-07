@@ -75,6 +75,8 @@ imsg send-attachment --chat 'iMessage;-;+15551234567' \
   --reply-to <messageGuid> --file ~/Desktop/photo.jpg
 ```
 
+Bridge attachment captions preserve the supplied text, including intentional line breaks. The caption and file are separate message parts; imsg does not append a blank line to the caption.
+
 ### Native voice messages
 
 ```bash

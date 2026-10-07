@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve attachment caption text without adding a trailing blank line, keeping formatting and file parts intact (#336, thanks @logananderson).
+
 ## 0.15.10 - 2026-09-30
 
 **Highlights:** Reliable attachment receipts, unloaded reply targets, and exact group sends.
