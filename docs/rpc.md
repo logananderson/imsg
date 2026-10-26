@@ -131,6 +131,11 @@ mutations:
   server poisons only the mutation lane: queued and future mutations receive
   `-32004`, while reads, watch subscriptions, and unsubscribe remain healthy.
 
+For `send.attachment` and `send.sticker`, helper refusals before dispatch return
+`-32603` with `disposition: "not_started"` and `retry_safe: true`. This includes
+missing files, unavailable send capabilities, and unresolved sticker targets.
+Failures after dispatch remain delivery-unknown and must not be retried automatically.
+
 The poison is intentionally process-local. Restart the `imsg rpc` child to
 clear it after independently resolving the uncertain operation. Notifications
 remain silent when rejected, as required by JSON-RPC.

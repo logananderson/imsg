@@ -1,3 +1,9 @@
+/// A refusal before the message reaches Messages.app. Nothing was sent, so the
+/// caller can safely try again or send another way.
+static NSDictionary *notStartedResponse(NSInteger requestId, NSString *error) {
+    return errorResponseWithDisposition(requestId, error, @"not_started");
+}
+
 static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *params) {
     NSString *chatGuid = params[@"chatGuid"];
     NSString *filePath = params[@"filePath"];
@@ -11,48 +17,49 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
     BOOL isAudio = [audioFlag boolValue];
     NSArray *textFormatting = params[@"textFormatting"];
 
-    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
-    if (!filePath.length) return errorResponse(requestId, @"Missing filePath");
+    if (!chatGuid.length) return notStartedResponse(requestId, @"Missing chatGuid");
+    if (!filePath.length) return notStartedResponse(requestId, @"Missing filePath");
     if (!message) message = @"";
     NSError *attrErr = nil;
     NSDictionary *attrs = [[NSFileManager defaultManager]
         attributesOfItemAtPath:filePath error:&attrErr];
     if (!attrs) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             [NSString stringWithFormat:@"File not found: %@", filePath]);
     }
     if ([attrs[NSFileType] isEqualToString:NSFileTypeSymbolicLink]) {
-        return errorResponse(requestId, @"Symlinked attachment paths are not allowed");
+        return notStartedResponse(requestId, @"Symlinked attachment paths are not allowed");
     }
     if (pathHasSymlinkComponent(filePath)) {
-        return errorResponse(requestId, @"Attachment path traverses a symlink");
+        return notStartedResponse(requestId, @"Attachment path traverses a symlink");
     }
     if (![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             [NSString stringWithFormat:@"File not found: %@", filePath]);
     }
 
     IMChat *chat = resolveChatByGuid(chatGuid);
     if (!chat) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
     }
 
     NSURL *fileURL = [NSURL fileURLWithPath:filePath];
     NSString *filename = [fileURL lastPathComponent];
 
+    BOOL dispatchAttempted = NO;
     @try {
         NSString *prepErr = nil;
         IMFileTransfer *transfer = prepareOutgoingTransfer(
             fileURL, filename, chatGuid, IMsgOutgoingTransferKindAttachment,
             nil, NULL, &prepErr);
         if (!transfer) {
-            return errorResponse(requestId,
+            return notStartedResponse(requestId,
                 prepErr.length ? prepErr : @"Could not register attachment transfer");
         }
         NSString *transferGuid = [transfer guid];
         if (!transferGuid.length) {
-            return errorResponse(requestId, @"Transfer registered without guid");
+            return notStartedResponse(requestId, @"Transfer registered without guid");
         }
 
         NSAttributedString *body = buildCaptionedAttachmentAttributed(
@@ -81,7 +88,7 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
                                       NSMakeRange(0, body.length), nil,
                                       @[transferGuid], isAudio, NO, nil);
         if (!imMessage) {
-            return errorResponse(requestId, @"Could not build IMMessage with attachment");
+            return notStartedResponse(requestId, @"Could not build IMMessage with attachment");
         }
         if (parentMessage
             && [imMessage respondsToSelector:@selector(setThreadOriginator:)]) {
@@ -95,9 +102,10 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
         }
         NSString *registerErr = nil;
         if (!registerPreparedTransfer(transfer, &registerErr)) {
-            return errorResponse(requestId,
+            return notStartedResponse(requestId,
                 registerErr.length ? registerErr : @"Could not register attachment transfer");
         }
+        dispatchAttempted = YES;
         dispatchIMMessageInChat(chat, imMessage, threadIdentifier, parentItem);
         NSString *guid = outgoingMessageGuid(imMessage);
         return successResponse(requestId, @{
@@ -107,8 +115,10 @@ static NSDictionary *handleSendAttachment(NSInteger requestId, NSDictionary *par
             @"selectedMessageGuid": selectedMessageGuid ?: @""
         });
     } @catch (NSException *exception) {
-        return errorResponse(requestId,
-            [NSString stringWithFormat:@"send-attachment failed: %@", exception.reason]);
+        NSString *failure =
+            [NSString stringWithFormat:@"send-attachment failed: %@", exception.reason];
+        return dispatchAttempted ? errorResponse(requestId, failure)
+                                 : notStartedResponse(requestId, failure);
     }
 }
 
@@ -138,7 +148,7 @@ static NSDictionary *handleSendSticker(NSInteger requestId, NSDictionary *params
         || ![filePath isKindOfClass:[NSString class]]
         || ![contentHash isKindOfClass:[NSString class]]
         || ![accessibilityLabel isKindOfClass:[NSString class]]) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             @"chatGuid, filePath, contentHash, and accessibilityLabel must be strings");
     }
     if (![pixelWidth isKindOfClass:[NSNumber class]]
@@ -147,77 +157,77 @@ static NSDictionary *handleSendSticker(NSInteger requestId, NSDictionary *params
         || CFGetTypeID((__bridge CFTypeRef)pixelHeight) == CFBooleanGetTypeID()
         || pixelWidth.doubleValue != (double)pixelWidth.integerValue
         || pixelHeight.doubleValue != (double)pixelHeight.integerValue) {
-        return errorResponse(requestId, @"pixelWidth and pixelHeight must be integers");
+        return notStartedResponse(requestId, @"pixelWidth and pixelHeight must be integers");
     }
     if (rawSelectedMessageGuid
         && ![rawSelectedMessageGuid isKindOfClass:[NSString class]]) {
-        return errorResponse(requestId, @"selectedMessageGuid must be a string");
+        return notStartedResponse(requestId, @"selectedMessageGuid must be a string");
     }
     if (partIndexNum && ![partIndexNum isKindOfClass:[NSNumber class]]) {
-        return errorResponse(requestId, @"targetPartIndex must be an integer");
+        return notStartedResponse(requestId, @"targetPartIndex must be an integer");
     }
     if (partIndexNum
         && (CFGetTypeID((__bridge CFTypeRef)partIndexNum) == CFBooleanGetTypeID()
             || partIndexNum.doubleValue != (double)partIndexNum.integerValue)) {
-        return errorResponse(requestId, @"targetPartIndex must be an integer");
+        return notStartedResponse(requestId, @"targetPartIndex must be an integer");
     }
     NSInteger targetPartIndex = partIndexNum ? [partIndexNum integerValue] : 0;
 
-    if (!chatGuid.length) return errorResponse(requestId, @"Missing chatGuid");
-    if (!filePath.length) return errorResponse(requestId, @"Missing filePath");
+    if (!chatGuid.length) return notStartedResponse(requestId, @"Missing chatGuid");
+    if (!filePath.length) return notStartedResponse(requestId, @"Missing filePath");
     if (targetPartIndex < 0) {
-        return errorResponse(requestId, @"targetPartIndex must be non-negative");
+        return notStartedResponse(requestId, @"targetPartIndex must be non-negative");
     }
     NSString *selectedMessageGuid = nil;
     NSInteger requestedPartIndex = targetPartIndex;
     if (!resolveMessagePartTarget(rawSelectedMessageGuid, &selectedMessageGuid, &targetPartIndex)) {
-        return errorResponse(requestId, @"Malformed sticker target");
+        return notStartedResponse(requestId, @"Malformed sticker target");
     }
     if (partIndexNum && requestedPartIndex != targetPartIndex) {
-        return errorResponse(requestId, @"Conflicting sticker target parts");
+        return notStartedResponse(requestId, @"Conflicting sticker target parts");
     }
     if (!selectedMessageGuid.length && targetPartIndex != 0) {
-        return errorResponse(requestId, @"targetPartIndex requires selectedMessageGuid");
+        return notStartedResponse(requestId, @"targetPartIndex requires selectedMessageGuid");
     }
     if (!stickerAttachmentMessageInitializerAvailable()) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             @"Sticker attachment message initializer unavailable");
     }
     if (selectedMessageGuid.length
         && !stickerAssociatedMessageInitializerAvailable()) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             @"Sticker associated-message initializer unavailable");
     }
     if (!stickerTransferSelectorsAvailable()) {
-        return errorResponse(requestId, @"Required sticker transfer selectors unavailable");
+        return notStartedResponse(requestId, @"Required sticker transfer selectors unavailable");
     }
 
     NSString *metadataErr = nil;
     NSDictionary *assetMetadata = stickerAssetMetadata(filePath, &metadataErr);
     if (!assetMetadata) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             metadataErr.length ? metadataErr : @"Invalid sticker image");
     }
     if (![assetMetadata[@"hash"] isEqualToString:contentHash.lowercaseString]
         || ![assetMetadata[@"width"] isEqualToNumber:pixelWidth]
         || ![assetMetadata[@"height"] isEqualToNumber:pixelHeight]) {
-        return errorResponse(requestId, @"Sticker metadata does not match staged bytes");
+        return notStartedResponse(requestId, @"Sticker metadata does not match staged bytes");
     }
     NSMutableDictionary *verifiedMetadata = [assetMetadata mutableCopy];
     verifiedMetadata[@"accessibilityLabel"] = accessibilityLabel;
 
     IMChat *chat = resolveChatByGuid(chatGuid);
     if (!chat) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             [NSString stringWithFormat:@"Chat not found: %@", chatGuid]);
     }
     NSString *observedService = serviceNameForChat(chat, chatGuid);
     if (![observedService isEqualToString:@"iMessage"]
         && ![observedService isEqualToString:@"iMessageLite"]) {
-        return errorResponse(requestId, @"Stickers require an iMessage chat");
+        return notStartedResponse(requestId, @"Stickers require an iMessage chat");
     }
     if (![chat respondsToSelector:@selector(sendMessage:)]) {
-        return errorResponse(requestId, @"Chat send selector unavailable");
+        return notStartedResponse(requestId, @"Chat send selector unavailable");
     }
     NSString *resolvedChatGuid = [chat respondsToSelector:@selector(guid)]
         ? [chat performSelector:@selector(guid)] : chatGuid;
@@ -226,7 +236,7 @@ static NSDictionary *handleSendSticker(NSInteger requestId, NSDictionary *params
     NSRange targetRange = NSMakeRange(0, 1);
     if (selectedMessageGuid.length) {
         if (!stickerMessageBelongsToChat(chat, selectedMessageGuid)) {
-            return errorResponse(requestId,
+            return notStartedResponse(requestId,
                 @"Sticker target does not belong to the selected chat");
         }
         parentChatItem = findMessagePart(chat, selectedMessageGuid, targetPartIndex);
@@ -234,23 +244,23 @@ static NSDictionary *handleSendSticker(NSInteger requestId, NSDictionary *params
             || ![parentChatItem respondsToSelector:@selector(index)]
             || [(IMMessagePartChatItem *)parentChatItem index] != targetPartIndex
             || ![parentChatItem respondsToSelector:@selector(messagePartRange)]) {
-            return errorResponse(requestId, @"Sticker target message part not found");
+            return notStartedResponse(requestId, @"Sticker target message part not found");
         }
         targetRange = [(IMMessagePartChatItem *)parentChatItem messagePartRange];
         if (targetRange.length == 0) {
-            return errorResponse(requestId, @"Sticker target message part has an empty range");
+            return notStartedResponse(requestId, @"Sticker target message part has an empty range");
         }
     }
 
     NSString *snapshotErr = nil;
     NSString *snapshotPath = writeStickerSnapshot(assetMetadata, filePath, &snapshotErr);
     if (!snapshotPath.length) {
-        return errorResponse(requestId,
+        return notStartedResponse(requestId,
             snapshotErr.length ? snapshotErr : @"Could not snapshot sticker image");
     }
     if (!removeStickerFileSecurely(filePath)) {
         removeStickerFileSecurely(snapshotPath);
-        return errorResponse(requestId, @"Could not remove sticker handoff file");
+        return notStartedResponse(requestId, @"Could not remove sticker handoff file");
     }
     [verifiedMetadata removeObjectForKey:@"data"];
     verifiedMetadata[@"filename"] = snapshotPath.lastPathComponent;
@@ -266,13 +276,13 @@ static NSDictionary *handleSendSticker(NSInteger requestId, NSDictionary *params
             verifiedMetadata, &activePath, &prepErr);
         if (!transfer) {
             cleanupPreparedStickerPaths(snapshotPath, activePath);
-            return errorResponse(requestId,
+            return notStartedResponse(requestId,
                 prepErr.length ? prepErr : @"Could not register sticker transfer");
         }
         NSString *transferGuid = [transfer guid];
         if (!transferGuid.length) {
             cleanupPreparedStickerPaths(snapshotPath, activePath);
-            return errorResponse(requestId, @"Sticker transfer registered without guid");
+            return notStartedResponse(requestId, @"Sticker transfer registered without guid");
         }
 
         // Target and outgoing attachment part indexes are different domains.
@@ -297,12 +307,12 @@ static NSDictionary *handleSendSticker(NSInteger requestId, NSDictionary *params
                                       @[transferGuid], NO, NO, nil);
         if (!imMessage) {
             cleanupPreparedStickerPaths(snapshotPath, activePath);
-            return errorResponse(requestId, @"Could not build sticker IMMessage");
+            return notStartedResponse(requestId, @"Could not build sticker IMMessage");
         }
         NSString *registerErr = nil;
         if (!registerPreparedTransfer(transfer, &registerErr)) {
             cleanupPreparedStickerPaths(snapshotPath, activePath);
-            return errorResponse(requestId,
+            return notStartedResponse(requestId,
                 registerErr.length ? registerErr : @"Could not register sticker transfer");
         }
         dispatchAttempted = YES;
@@ -316,11 +326,11 @@ static NSDictionary *handleSendSticker(NSInteger requestId, NSDictionary *params
             @"targetPartIndex": @(targetPartIndex)
         });
     } @catch (NSException *exception) {
-        if (!dispatchAttempted) {
-            cleanupPreparedStickerPaths(snapshotPath, activePath);
-        }
-        return errorResponse(requestId,
-            [NSString stringWithFormat:@"send-sticker failed: %@", exception.reason]);
+        NSString *failure =
+            [NSString stringWithFormat:@"send-sticker failed: %@", exception.reason];
+        if (dispatchAttempted) return errorResponse(requestId, failure);
+        cleanupPreparedStickerPaths(snapshotPath, activePath);
+        return notStartedResponse(requestId, failure);
     }
 }
 
